@@ -286,26 +286,21 @@ h1 em{font-style:normal;color:var(--accent)}
     <button class="ctrl-btn" id="ctrl-chat" onclick="Room.toggleChat()" title="Чат">
       💬<span class="ctrl-badge hidden" id="chat-badge">0</span>
     </button>
+    <button class="ctrl-btn" onclick="Room.toggleDebug()" title="Диагностика" style="font-size:14px">🔍</button>
     <button class="ctrl-btn ctrl-end" onclick="Room.leave()" title="Завершить">📵</button>
   </div>
 </div>
 
 <script>
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 // CONFIG
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun.relay.metered.ca:80' },
     {
       urls: 'turn:global.relay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:global.relay.metered.ca:80?transport=tcp',
       username: 'openrelayproject',
       credential: 'openrelayproject'
     },
@@ -325,82 +320,124 @@ const ICE_SERVERS = {
 const AVATAR_COLORS = ['av-purple','av-mint','av-coral','av-amber','av-blue'];
 let avatarIdx = 0;
 function nextAvatar(){ return AVATAR_COLORS[avatarIdx++ % AVATAR_COLORS.length]; }
-function initials(name){ return name.trim().split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase() || '?'; }
+function initials(name){ return (name||'?').trim().split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase() || '?'; }
 
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 // STATE
-// ─────────────────────────────────────────────────────────────────
-let socket = null;
-let localStream = null;
+// ═══════════════════════════════════════════════
+let socket       = null;
+let localStream  = null;
 let screenStream = null;
 let currentRoomId = null;
-let myName = '';
-let localMicOn = true, localCamOn = true, screenSharing = false;
-let chatOpen = false, unreadChat = 0;
+let myName       = '';
+let localMicOn   = true;
+let localCamOn   = true;
+let screenSharing = false;
+let chatOpen     = false;
+let unreadChat   = 0;
 
-// peers: Map<socketId, { pc: RTCPeerConnection, stream: MediaStream, name, avatarClass, tileEl }>
+// peers: Map<socketId, { pc, stream, name, avatarClass, tileEl, iceBuf[] }>
 const peers = new Map();
 
-// ─────────────────────────────────────────────────────────────────
-// SOCKET SETUP
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
+// DEBUG LOG (видно прямо в интерфейсе)
+// ═══════════════════════════════════════════════
+function dbg(...args){
+  console.log('[NexMeet]', ...args);
+  const panel = document.getElementById('dbg-panel');
+  if(!panel) return;
+  const line = document.createElement('div');
+  line.textContent = new Date().toLocaleTimeString('ru') + ' ' + args.join(' ');
+  line.style.cssText = 'font-size:11px;padding:2px 0;border-bottom:1px solid #222;color:#aaa';
+  panel.appendChild(line);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════
+// SOCKET
+// ═══════════════════════════════════════════════
 function connectSocket(){
   if(socket && socket.connected) return;
-  socket = io();
 
-  // Получаем список уже присутствующих → МЫ им звоним (offer)
+  // Явно указываем транспорт — сначала polling (работает везде), потом upgrade до WS
+  socket = io({ transports: ['polling', 'websocket'] });
+
+  socket.on('connect', () => {
+    dbg('✅ socket connected id=' + socket.id + ' transport=' + socket.io.engine.transport.name);
+    socket.io.engine.on('upgrade', (t) => dbg('⬆️ upgraded to', t.name));
+  });
+
+  socket.on('connect_error', (e) => dbg('❌ connect_error', e.message));
+
+  socket.on('disconnect', (reason) => dbg('🔌 socket disconnect:', reason));
+
+  // ── Получаем список тех кто уже в комнате → МЫ им звоним
   socket.on('room-users', async (users) => {
+    dbg('room-users received:', users.length, 'users', JSON.stringify(users.map(u=>u.name)));
     for(const u of users){
-      await createPeer(u.socketId, u.name, true); // мы инициируем
+      await createPeer(u.socketId, u.name, true);
     }
   });
 
-  // Кто-то новый вошёл → ОНИ нам позвонят, мы только создаём PC и ждём offer
+  // ── Кто-то новый вошёл → ОН нам позвонит (мы не инициируем)
   socket.on('user-joined', async ({ socketId, name }) => {
-    showToast(`${name} вошёл в комнату`);
-    await createPeer(socketId, name, false); // ждём их offer
+    dbg('user-joined:', name, socketId);
+    showToast(`${name} вошёл`);
+    await createPeer(socketId, name, false);
   });
 
+  // ── WebRTC сигнализация
   socket.on('signal', async ({ from, data }) => {
+    dbg('signal from', from, ':', data.type || 'candidate');
     let entry = peers.get(from);
     if(!entry){
+      dbg('  → unknown peer, creating fallback entry');
       entry = await createPeer(from, 'Участник', false);
     }
     const pc = entry.pc;
 
-    if(data.type === 'offer'){
-      await pc.setRemoteDescription(new RTCSessionDescription(data));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit('signal', { to: from, data: pc.localDescription });
-    } else if(data.type === 'answer'){
-      if(pc.signalingState === 'have-local-offer'){
+    try{
+      if(data.type === 'offer'){
         await pc.setRemoteDescription(new RTCSessionDescription(data));
-      }
-    } else if(data.candidate){
-      try{
-        if(pc.remoteDescription) await pc.addIceCandidate(new RTCIceCandidate(data));
-        else{
-          // буферизуем кандидатов если remote ещё не установлен
-          entry.pendingCandidates = entry.pendingCandidates || [];
-          entry.pendingCandidates.push(data);
+        await flushIceBuf(entry);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('signal', { to: from, data: pc.localDescription });
+        dbg('  → sent answer to', from);
+
+      } else if(data.type === 'answer'){
+        if(pc.signalingState === 'have-local-offer'){
+          await pc.setRemoteDescription(new RTCSessionDescription(data));
+          await flushIceBuf(entry);
+        } else {
+          dbg('  → answer ignored, signalingState=', pc.signalingState);
         }
-      }catch(e){ console.warn('ICE candidate error', e); }
+
+      } else if(data.candidate){
+        if(pc.remoteDescription && pc.remoteDescription.type){
+          await pc.addIceCandidate(new RTCIceCandidate(data));
+        } else {
+          entry.iceBuf.push(data);
+          dbg('  → ICE buffered (no remoteDesc yet), buf size=', entry.iceBuf.length);
+        }
+      }
+    } catch(e){
+      dbg('  ❌ signal handler error:', e.message);
     }
   });
 
   socket.on('user-left', ({ socketId, name }) => {
+    dbg('user-left:', name, socketId);
     showToast(`${name} покинул комнату`);
     closePeer(socketId);
   });
 
   socket.on('media-state', ({ socketId, micOn, camOn }) => {
     const entry = peers.get(socketId);
-    if(!entry) return;
-    updateTileMediaState(entry.tileEl, micOn, camOn, entry.name, entry.avatarClass);
+    if(entry) updateTileMediaState(entry.tileEl, micOn, camOn, entry.name, entry.avatarClass);
   });
 
-  socket.on('chat-msg', ({ from, name, text, ts }) => {
+  socket.on('chat-msg', ({ from, name, text }) => {
     appendChatMsg(name, text, from === socket.id);
     if(!chatOpen){
       unreadChat++;
@@ -411,65 +448,85 @@ function connectSocket(){
   });
 }
 
-// ─────────────────────────────────────────────────────────────────
+async function flushIceBuf(entry){
+  if(!entry.iceBuf || !entry.iceBuf.length) return;
+  dbg('flushing', entry.iceBuf.length, 'buffered ICE candidates');
+  for(const c of entry.iceBuf){
+    try{ await entry.pc.addIceCandidate(new RTCIceCandidate(c)); }catch(e){}
+  }
+  entry.iceBuf = [];
+}
+
+// ═══════════════════════════════════════════════
 // PEER CONNECTION
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 async function createPeer(socketId, name, weInitiate){
-  if(peers.has(socketId)) return peers.get(socketId);
+  if(peers.has(socketId)){
+    dbg('createPeer: already exists', socketId);
+    return peers.get(socketId);
+  }
+
+  dbg(`createPeer: ${name} (${socketId}) weInitiate=${weInitiate}`);
 
   const pc = new RTCPeerConnection(ICE_SERVERS);
   const av = nextAvatar();
   const tileEl = addVideoTile(socketId, name, av);
-  const entry = { pc, stream: null, name, avatarClass: av, tileEl, pendingCandidates: [] };
+  const entry = { pc, stream: null, name, avatarClass: av, tileEl, iceBuf: [] };
   peers.set(socketId, entry);
 
-  // Добавляем свои треки ДО создания offer
+  // Добавляем свои треки
   if(localStream){
-    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+    localStream.getTracks().forEach(t => {
+      pc.addTrack(t, localStream);
+      dbg('  addTrack:', t.kind, t.enabled);
+    });
+  } else {
+    dbg('  ⚠️ localStream is null! no tracks added');
   }
 
   pc.onicecandidate = (e) => {
-    if(e.candidate) socket.emit('signal', { to: socketId, data: e.candidate });
+    if(e.candidate){
+      socket.emit('signal', { to: socketId, data: e.candidate });
+    } else {
+      dbg('  ICE gathering complete for', socketId);
+    }
   };
 
-  pc.ontrack = (e) => {
-    const stream = e.streams[0];
-    entry.stream = stream;
-    const video = tileEl.querySelector('video');
-    if(video){ video.srcObject = stream; video.style.display='block'; }
-    const av = tileEl.querySelector('.vtile-avatar');
-    if(av) av.style.display='none';
-    const overlay = tileEl.querySelector('.cam-off-overlay');
-    if(overlay) overlay.style.display='none';
+  pc.onicegatheringstatechange = () => dbg('  ICE gathering:', pc.iceGatheringState, 'for', socketId);
+  pc.oniceconnectionstatechange = () => {
+    dbg('  ICE connection:', pc.iceConnectionState, 'for', socketId);
+    if(pc.iceConnectionState === 'failed') pc.restartIce();
   };
-
   pc.onconnectionstatechange = () => {
-    console.log(`[${socketId}] connectionState: ${pc.connectionState}`);
+    dbg('  PC connection:', pc.connectionState, 'for', socketId);
     if(['disconnected','failed','closed'].includes(pc.connectionState)){
       closePeer(socketId);
     }
   };
 
-  pc.onsignalingstatechange = () => {
-    console.log(`[${socketId}] signalingState: ${pc.signalingState}`);
-  };
-
-  // Сбрасываем буферизованных ICE-кандидатов после установки remoteDescription
-  const origSetRemote = pc.setRemoteDescription.bind(pc);
-  pc.setRemoteDescription = async (desc) => {
-    await origSetRemote(desc);
-    if(entry.pendingCandidates.length){
-      for(const c of entry.pendingCandidates){
-        try{ await pc.addIceCandidate(new RTCIceCandidate(c)); }catch(e){}
-      }
-      entry.pendingCandidates = [];
+  pc.ontrack = (e) => {
+    dbg('  ontrack:', e.track.kind, 'from', socketId, 'streams:', e.streams.length);
+    const stream = e.streams[0];
+    if(!stream){ dbg('  ⚠️ no stream in ontrack'); return; }
+    entry.stream = stream;
+    const video = tileEl.querySelector('video');
+    if(video){
+      video.srcObject = stream;
+      video.style.display = 'block';
+      video.play().catch(err => dbg('  video.play error:', err.message));
     }
+    const av = tileEl.querySelector('.vtile-avatar');
+    if(av) av.style.display = 'none';
+    const overlay = tileEl.querySelector('.cam-off-overlay');
+    if(overlay) overlay.style.display = 'none';
   };
 
+  // Только инициатор (новый участник) шлёт offer
   if(weInitiate){
     const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
     socket.emit('signal', { to: socketId, data: pc.localDescription });
+    dbg('  → offer sent to', socketId);
   }
 
   updateParticipantCount();
@@ -486,9 +543,9 @@ function closePeer(socketId){
   updateParticipantCount();
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 // VIDEO TILES
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 function addVideoTile(socketId, name, av){
   const tile = document.createElement('div');
   tile.className = 'vtile';
@@ -513,23 +570,20 @@ function addVideoTile(socketId, name, av){
 function updateTileMediaState(tileEl, micOn, camOn, name, av){
   const micIcon = tileEl.querySelector('.tl-mic');
   if(micIcon) micIcon.style.display = micOn ? 'none' : 'inline';
-
   const video = tileEl.querySelector('video');
   const overlay = tileEl.querySelector('.cam-off-overlay');
-  const avatar = tileEl.querySelector('.vtile-avatar:not(.cam-off-overlay .vtile-avatar)');
-
+  const avatar = tileEl.querySelector('.vtile-avatar');
   if(camOn){
-    overlay && (overlay.style.display='none');
-    if(video && video.srcObject){ video.style.display='block'; avatar && (avatar.style.display='none'); }
-    else { avatar && (avatar.style.display='flex'); }
+    if(overlay) overlay.style.display = 'none';
+    if(video && video.srcObject){ video.style.display='block'; if(avatar) avatar.style.display='none'; }
+    else { if(avatar) avatar.style.display='flex'; }
   } else {
-    video && (video.style.display='none');
-    avatar && (avatar.style.display='none');
-    overlay && (overlay.style.display='flex');
+    if(video) video.style.display='none';
+    if(avatar) avatar.style.display='none';
+    if(overlay) overlay.style.display='flex';
   }
 }
 
-// ─── LOCAL TILE ───
 function buildLocalTile(){
   const grid = document.getElementById('video-grid');
   let tile = grid.querySelector('.vtile.local');
@@ -550,7 +604,12 @@ function buildLocalTile(){
     updateGrid();
   }
   const video = tile.querySelector('video');
-  if(localStream && localCamOn){ video.srcObject = localStream; video.style.display='block'; tile.querySelector('.vtile-avatar').style.display='none'; }
+  if(localStream && localCamOn){
+    video.srcObject = localStream;
+    video.style.display = 'block';
+    const av = tile.querySelector('.vtile-avatar');
+    if(av) av.style.display = 'none';
+  }
   return tile;
 }
 
@@ -560,27 +619,28 @@ function updateGrid(){
   grid.className = 'video-grid vg-' + Math.min(count, 6);
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 // CHAT
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 function appendChatMsg(name, text, self=false){
   const msgs = document.getElementById('chat-msgs');
   const div = document.createElement('div');
   div.className = 'chat-msg';
-  div.innerHTML = `<div class="cm-name ${self?'self':''}">${self?'Вы':name}</div><div class="cm-text">${escHtml(text)}</div>`;
+  div.innerHTML = `<div class="cm-name ${self?'self':''}">${self?'Вы':escHtml(name)}</div><div class="cm-text">${escHtml(text)}</div>`;
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
-function escHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 function updateParticipantCount(){
   const n = peers.size + 1;
-  document.getElementById('room-sub-label').textContent = `${n} участник${n===1?'':n<5?'а':'ов'}`;
+  document.getElementById('room-sub-label').textContent =
+    `${n} участник${n===1?'':n<5?'а':'ов'}`;
 }
 
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 // UI CONTROLLER
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 const UI = {
   goHome(){
     Lobby.stop();
@@ -588,19 +648,18 @@ const UI = {
     currentRoomId = null;
   },
   createRoom(){
-    const id = (Math.random().toString(36).substr(2,4)+Math.random().toString(36).substr(2,4)).toUpperCase();
-    currentRoomId = id.slice(0,4)+'-'+id.slice(4,8);
+    const a = Math.random().toString(36).substr(2,4).toUpperCase();
+    const b = Math.random().toString(36).substr(2,4).toUpperCase();
+    currentRoomId = a + '-' + b;
     this._goLobby();
   },
   joinFromHome(){
-    const code = document.getElementById('home-code').value.trim().toUpperCase();
+    const code = document.getElementById('home-code').value.trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
     if(!code){ document.getElementById('home-code').focus(); return; }
-    currentRoomId = code.replace(/[^A-Z0-9]/g,'').replace(/(.{4})(.)/,'$1-$2').substr(0,9);
+    currentRoomId = code.slice(0,4) + (code.length>4 ? '-'+code.slice(4,8) : '');
     this._goLobby();
   },
-  showJoinPrompt(){
-    document.getElementById('home-code').focus();
-  },
+  showJoinPrompt(){ document.getElementById('home-code').focus(); },
   _goLobby(){
     document.getElementById('lobby-room-code').textContent = 'Комната: ' + currentRoomId;
     document.getElementById('display-name').value = '';
@@ -609,71 +668,84 @@ const UI = {
   }
 };
 
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 // LOBBY
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 const Lobby = {
   async start(){
+    localCamOn = true; localMicOn = true;
     try{
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       const v = document.getElementById('preview-video');
       v.srcObject = localStream;
       v.style.display = 'block';
       document.getElementById('no-cam-msg').style.display = 'none';
+      this._updateBtn('cam', true);
+      this._updateBtn('mic', true);
     } catch(e){
-      // no permission — still allow joining audio only
       try{
         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         localCamOn = false;
         this._updateBtn('cam', false);
-      } catch(_){}
+      } catch(_){
+        localStream = null;
+      }
     }
   },
   stop(){
     if(localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream = null; }
-    document.getElementById('preview-video').srcObject = null;
-    document.getElementById('preview-video').style.display = 'none';
+    const v = document.getElementById('preview-video');
+    if(v){ v.srcObject = null; v.style.display = 'none'; }
     document.getElementById('no-cam-msg').style.display = 'flex';
   },
   toggleCam(){
     localCamOn = !localCamOn;
-    if(localStream){ localStream.getVideoTracks().forEach(t=>t.enabled=localCamOn); }
+    if(localStream) localStream.getVideoTracks().forEach(t=>t.enabled=localCamOn);
     const v = document.getElementById('preview-video');
     if(v) v.style.display = localCamOn ? 'block' : 'none';
     this._updateBtn('cam', localCamOn);
   },
   toggleMic(){
     localMicOn = !localMicOn;
-    if(localStream){ localStream.getAudioTracks().forEach(t=>t.enabled=localMicOn); }
+    if(localStream) localStream.getAudioTracks().forEach(t=>t.enabled=localMicOn);
     this._updateBtn('mic', localMicOn);
   },
   _updateBtn(type, on){
     const btn = document.getElementById(`lobby-${type}-btn`);
-    btn.className = 'toggle-btn ' + (on?'on':'off');
+    if(btn) btn.className = 'toggle-btn ' + (on ? 'on' : 'off');
   },
   async enter(){
     const name = document.getElementById('display-name').value.trim();
     if(!name){ document.getElementById('display-name').focus(); return; }
     myName = name;
 
-    // If no stream yet
     if(!localStream){
       try{ localStream = await navigator.mediaDevices.getUserMedia({audio:true}); }
       catch(_){}
     }
 
     document.getElementById('room-title-label').textContent = '# ' + currentRoomId;
+    avatarIdx = 0;
     showScreen('room');
     buildLocalTile();
     connectSocket();
+
+    // Небольшая задержка чтобы socket успел connect
+    await new Promise(r => {
+      if(socket.connected) return r();
+      socket.once('connect', r);
+      setTimeout(r, 3000); // fallback
+    });
+
+    dbg('emitting join-room:', currentRoomId, myName);
     socket.emit('join-room', { roomId: currentRoomId, name: myName });
     updateParticipantCount();
   }
 };
 
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 // ROOM CONTROLS
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 const Room = {
   toggleMic(){
     localMicOn = !localMicOn;
@@ -681,8 +753,9 @@ const Room = {
     const btn = document.getElementById('ctrl-mic');
     btn.className = 'ctrl-btn ' + (localMicOn ? 'active' : 'muted');
     btn.textContent = localMicOn ? '🎤' : '🔇';
-    document.getElementById('local-mic-icon').style.display = localMicOn ? 'none' : 'inline';
-    socket.emit('media-state', { micOn: localMicOn, camOn: localCamOn });
+    const icon = document.getElementById('local-mic-icon');
+    if(icon) icon.style.display = localMicOn ? 'none' : 'inline';
+    if(socket) socket.emit('media-state', { micOn: localMicOn, camOn: localCamOn });
   },
   toggleCam(){
     localCamOn = !localCamOn;
@@ -697,7 +770,7 @@ const Room = {
       if(v) v.style.display = localCamOn ? 'block' : 'none';
       if(av) av.style.display = localCamOn ? 'none' : 'flex';
     }
-    socket.emit('media-state', { micOn: localMicOn, camOn: localCamOn });
+    if(socket) socket.emit('media-state', { micOn: localMicOn, camOn: localCamOn });
   },
   async toggleScreen(){
     if(!screenSharing){
@@ -706,7 +779,6 @@ const Room = {
         screenSharing = true;
         document.getElementById('ctrl-screen').className = 'ctrl-btn active';
         const sTrack = screenStream.getVideoTracks()[0];
-        // Replace video track in all peers
         peers.forEach(({ pc }) => {
           const sender = pc.getSenders().find(s=>s.track && s.track.kind==='video');
           if(sender) sender.replaceTrack(sTrack);
@@ -758,8 +830,12 @@ const Room = {
     navigator.clipboard.writeText(url).catch(()=>{});
     showToast('Ссылка скопирована!');
   },
+  toggleDebug(){
+    const panel = document.getElementById('dbg-wrap');
+    if(panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  },
   leave(){
-    Room.stopScreen();
+    this.stopScreen();
     peers.forEach((_, sid) => closePeer(sid));
     if(localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream=null; }
     if(socket){ socket.disconnect(); socket=null; }
@@ -768,19 +844,20 @@ const Room = {
     document.getElementById('chat-panel').classList.add('closed');
     chatOpen = false; unreadChat = 0; avatarIdx = 0;
     localMicOn = true; localCamOn = true; screenSharing = false;
-    document.getElementById('ctrl-mic').className = 'ctrl-btn active';
-    document.getElementById('ctrl-mic').textContent = '🎤';
-    document.getElementById('ctrl-cam').className = 'ctrl-btn active';
-    document.getElementById('ctrl-cam').textContent = '📷';
+    ['ctrl-mic','ctrl-cam'].forEach(id=>{
+      const b = document.getElementById(id);
+      if(b){ b.className='ctrl-btn active'; b.textContent = id.includes('mic')?'🎤':'📷'; }
+    });
+    document.getElementById('ctrl-screen').className = 'ctrl-btn';
     document.getElementById('ctrl-chat').className = 'ctrl-btn';
     document.getElementById('chat-badge').classList.add('hidden');
     showScreen('home');
   }
 };
 
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 // HELPERS
-// ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════
 function showScreen(name){
   ['home','join','room'].forEach(s=>{
     document.getElementById('screen-'+s).classList.toggle('hidden', s!==name);
@@ -795,7 +872,7 @@ function showToast(msg, dur=2500){
   t._tid = setTimeout(()=>t.classList.remove('show'), dur);
 }
 
-// ── Deep link: ?room=XXXX-XXXX ──
+// Deep link: ?room=XXXX-XXXX
 window.addEventListener('DOMContentLoaded', () => {
   const params = new URLSearchParams(location.search);
   const room = params.get('room');
@@ -805,5 +882,24 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 </script>
+
+<!-- DEBUG PANEL -->
+<style>
+#dbg-wrap{position:fixed;bottom:0;left:0;right:0;background:#0a0a0a;border-top:1px solid #333;z-index:9999;display:none;max-height:200px}
+#dbg-panel{overflow-y:auto;max-height:160px;padding:8px 12px;font-family:monospace}
+#dbg-toolbar{display:flex;align-items:center;justify-content:space-between;padding:4px 12px;border-bottom:1px solid #222}
+#dbg-toolbar span{font-size:11px;color:#666;font-family:monospace}
+#dbg-toolbar button{background:#222;border:1px solid #444;color:#aaa;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px}
+</style>
+<div id="dbg-wrap">
+  <div id="dbg-toolbar">
+    <span>🔍 NexMeet Debug Log</span>
+    <div style="display:flex;gap:6px">
+      <button onclick="document.getElementById('dbg-panel').innerHTML=''">Clear</button>
+      <button onclick="document.getElementById('dbg-wrap').style.display='none'">✕</button>
+    </div>
+  </div>
+  <div id="dbg-panel"></div>
+</div>
 </body>
 </html>
