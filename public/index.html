@@ -297,7 +297,28 @@ h1 em{font-style:normal;color:var(--accent)}
 const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' },
+    {
+      urls: 'turn:global.relay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:global.relay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ]
 };
 
@@ -327,23 +348,22 @@ function connectSocket(){
   if(socket && socket.connected) return;
   socket = io();
 
+  // Получаем список уже присутствующих → МЫ им звоним (offer)
   socket.on('room-users', async (users) => {
-    // Server sends list of already-present users → we call them
     for(const u of users){
-      await createPeer(u.socketId, u.name, true);
+      await createPeer(u.socketId, u.name, true); // мы инициируем
     }
   });
 
+  // Кто-то новый вошёл → ОНИ нам позвонят, мы только создаём PC и ждём offer
   socket.on('user-joined', async ({ socketId, name }) => {
     showToast(`${name} вошёл в комнату`);
-    await createPeer(socketId, name, false);
+    await createPeer(socketId, name, false); // ждём их offer
   });
 
   socket.on('signal', async ({ from, data }) => {
     let entry = peers.get(from);
     if(!entry){
-      // Late arrival: we don't know their name yet, will get it via user-joined first
-      // but handle gracefully
       entry = await createPeer(from, 'Участник', false);
     }
     const pc = entry.pc;
@@ -354,9 +374,18 @@ function connectSocket(){
       await pc.setLocalDescription(answer);
       socket.emit('signal', { to: from, data: pc.localDescription });
     } else if(data.type === 'answer'){
-      await pc.setRemoteDescription(new RTCSessionDescription(data));
+      if(pc.signalingState === 'have-local-offer'){
+        await pc.setRemoteDescription(new RTCSessionDescription(data));
+      }
     } else if(data.candidate){
-      try{ await pc.addIceCandidate(new RTCIceCandidate(data)); }catch(e){}
+      try{
+        if(pc.remoteDescription) await pc.addIceCandidate(new RTCIceCandidate(data));
+        else{
+          // буферизуем кандидатов если remote ещё не установлен
+          entry.pendingCandidates = entry.pendingCandidates || [];
+          entry.pendingCandidates.push(data);
+        }
+      }catch(e){ console.warn('ICE candidate error', e); }
     }
   });
 
@@ -391,10 +420,10 @@ async function createPeer(socketId, name, weInitiate){
   const pc = new RTCPeerConnection(ICE_SERVERS);
   const av = nextAvatar();
   const tileEl = addVideoTile(socketId, name, av);
-  const entry = { pc, stream: null, name, avatarClass: av, tileEl };
+  const entry = { pc, stream: null, name, avatarClass: av, tileEl, pendingCandidates: [] };
   peers.set(socketId, entry);
 
-  // Add our tracks to the peer connection
+  // Добавляем свои треки ДО создания offer
   if(localStream){
     localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
   }
@@ -408,18 +437,37 @@ async function createPeer(socketId, name, weInitiate){
     entry.stream = stream;
     const video = tileEl.querySelector('video');
     if(video){ video.srcObject = stream; video.style.display='block'; }
-    tileEl.querySelector('.vtile-avatar').style.display='none';
-    tileEl.querySelector('.cam-off-overlay') && (tileEl.querySelector('.cam-off-overlay').style.display='none');
+    const av = tileEl.querySelector('.vtile-avatar');
+    if(av) av.style.display='none';
+    const overlay = tileEl.querySelector('.cam-off-overlay');
+    if(overlay) overlay.style.display='none';
   };
 
   pc.onconnectionstatechange = () => {
+    console.log(`[${socketId}] connectionState: ${pc.connectionState}`);
     if(['disconnected','failed','closed'].includes(pc.connectionState)){
       closePeer(socketId);
     }
   };
 
+  pc.onsignalingstatechange = () => {
+    console.log(`[${socketId}] signalingState: ${pc.signalingState}`);
+  };
+
+  // Сбрасываем буферизованных ICE-кандидатов после установки remoteDescription
+  const origSetRemote = pc.setRemoteDescription.bind(pc);
+  pc.setRemoteDescription = async (desc) => {
+    await origSetRemote(desc);
+    if(entry.pendingCandidates.length){
+      for(const c of entry.pendingCandidates){
+        try{ await pc.addIceCandidate(new RTCIceCandidate(c)); }catch(e){}
+      }
+      entry.pendingCandidates = [];
+    }
+  };
+
   if(weInitiate){
-    const offer = await pc.createOffer();
+    const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
     socket.emit('signal', { to: socketId, data: pc.localDescription });
   }
