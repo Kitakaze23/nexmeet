@@ -24,16 +24,16 @@ io.on('connection', (socket) => {
     if (!rooms.has(roomId)) rooms.set(roomId, new Map());
     const room = rooms.get(roomId);
 
-    // Отправляем новому участнику список уже присутствующих
-    const existing = [...room.values()];
-    socket.emit('room-users', existing);
-
-    // Добавляем нового
+    // Сначала добавляем нового участника
     room.set(socket.id, { socketId: socket.id, name });
     socket.data.roomId = roomId;
     socket.data.name = name;
 
-    // Оповещаем остальных
+    // Отправляем новому участнику список уже присутствующих (без себя)
+    const existing = [...room.values()].filter(u => u.socketId !== socket.id);
+    socket.emit('room-users', existing);
+
+    // Оповещаем остальных о новом участнике
     socket.to(roomId).emit('user-joined', { socketId: socket.id, name });
 
     console.log(`[${roomId}] ${name} joined (${room.size} total)`);
