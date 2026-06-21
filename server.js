@@ -7,14 +7,32 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' },
-  // Railway/Render используют HTTP proxy — разрешаем оба транспорта
   transports: ['websocket', 'polling'],
   allowEIO3: true
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Диагностический endpoint — проверить что сервер живой
+// ── ICE конфиг отдаётся клиенту с сервера (credentials не светятся в HTML)
+app.get('/ice-config', (req, res) => {
+  const TURN_USER = '7bdb1099410fd2b4ec361942';
+  const TURN_PASS = 'MpIqK9pzidKpkmyg';
+  const TURN_HOST = 'global.relay.metered.ca';
+
+  const iceServers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: `turn:${TURN_HOST}:80`,                    username: TURN_USER, credential: TURN_PASS },
+    { urls: `turn:${TURN_HOST}:80?transport=tcp`,      username: TURN_USER, credential: TURN_PASS },
+    { urls: `turn:${TURN_HOST}:443`,                   username: TURN_USER, credential: TURN_PASS },
+    { urls: `turns:${TURN_HOST}:443?transport=tcp`,    username: TURN_USER, credential: TURN_PASS },
+  ];
+
+  console.log('ICE config: STUN + TURN via', TURN_HOST);
+  res.json({ iceServers });
+});
+
+// ── Health check
 app.get('/health', (req, res) => {
   const roomInfo = {};
   rooms.forEach((members, roomId) => {
@@ -34,27 +52,22 @@ io.on('connection', (socket) => {
     name = String(name).trim().slice(0, 64) || 'Аноним';
 
     socket.join(roomId);
-
     if (!rooms.has(roomId)) rooms.set(roomId, new Map());
     const room = rooms.get(roomId);
 
-    // Сохраняем участника
     room.set(socket.id, { socketId: socket.id, name });
     socket.data.roomId = roomId;
     socket.data.name = name;
 
-    // Список уже присутствующих (без себя) → отправляем новому
     const existing = [...room.values()].filter(u => u.socketId !== socket.id);
     socket.emit('room-users', existing);
-
-    // Оповещаем остальных
     socket.to(roomId).emit('user-joined', { socketId: socket.id, name });
 
-    console.log(`[${roomId}] "${name}" joined. Room now: ${room.size} users:`, [...room.values()].map(u=>u.name));
+    console.log(`[${roomId}] "${name}" joined. Total: ${room.size}:`, [...room.values()].map(u=>u.name));
   });
 
   socket.on('signal', ({ to, data }) => {
-    console.log(`signal ${socket.id} → ${to}: ${data.type || 'candidate'}`);
+    console.log(`signal ${socket.id.slice(0,6)} → ${to.slice(0,6)}: ${data.type || 'candidate'}`);
     io.to(to).emit('signal', { from: socket.id, data });
   });
 
@@ -72,7 +85,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', (reason) => {
     const { roomId, name } = socket.data;
-    console.log(`disconnect: ${socket.id} "${name}" reason: ${reason}`);
+    console.log(`disconnect: "${name}" reason: ${reason}`);
     if (roomId && rooms.has(roomId)) {
       const room = rooms.get(roomId);
       room.delete(socket.id);

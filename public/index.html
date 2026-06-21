@@ -293,29 +293,21 @@ h1 em{font-style:normal;color:var(--accent)}
 
 <script>
 // ═══════════════════════════════════════════════
-// CONFIG
+// CONFIG — ICE грузится с сервера (TURN credentials в env vars)
 // ═══════════════════════════════════════════════
-const ICE_SERVERS = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    {
-      urls: 'turn:global.relay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:global.relay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turns:global.relay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
-  ]
-};
+let ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+async function loadIceConfig() {
+  try {
+    const res = await fetch('/ice-config');
+    const cfg = await res.json();
+    ICE_SERVERS = cfg;
+    dbg('ICE config loaded:', cfg.iceServers.length, 'servers');
+    cfg.iceServers.forEach(s => dbg(' ', s.urls));
+  } catch(e) {
+    dbg('ICE config failed, STUN only:', e.message);
+  }
+}
 
 const AVATAR_COLORS = ['av-purple','av-mint','av-coral','av-amber','av-blue'];
 let avatarIdx = 0;
@@ -724,17 +716,20 @@ const Lobby = {
       catch(_){}
     }
 
+    // Грузим ICE конфиг с сервера (TURN credentials) перед входом
+    await loadIceConfig();
+
     document.getElementById('room-title-label').textContent = '# ' + currentRoomId;
     avatarIdx = 0;
     showScreen('room');
     buildLocalTile();
     connectSocket();
 
-    // Небольшая задержка чтобы socket успел connect
+    // Ждём connect
     await new Promise(r => {
       if(socket.connected) return r();
       socket.once('connect', r);
-      setTimeout(r, 3000); // fallback
+      setTimeout(r, 3000);
     });
 
     dbg('emitting join-room:', currentRoomId, myName);
