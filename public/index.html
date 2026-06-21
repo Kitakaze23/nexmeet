@@ -380,41 +380,50 @@ function connectSocket(){
 
   // ── WebRTC сигнализация
   socket.on('signal', async ({ from, data }) => {
-    dbg('signal from', from, ':', data.type || 'candidate');
+    const sigType = data.type || 'candidate';
+    dbg('📨 signal from', from.slice(0,6), ':', sigType, '| peers:', [...peers.keys()].map(k=>k.slice(0,6)).join(',') || 'none');
     let entry = peers.get(from);
     if(!entry){
-      dbg('  → unknown peer, creating fallback entry');
+      dbg('  → unknown peer! creating fallback. Known peers:', peers.size);
       entry = await createPeer(from, 'Участник', false);
     }
     const pc = entry.pc;
 
     try{
       if(data.type === 'offer'){
+        dbg('  signalingState before setRemote:', pc.signalingState);
         await pc.setRemoteDescription(new RTCSessionDescription(data));
         await flushIceBuf(entry);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        socket.emit('signal', { to: from, data: pc.localDescription });
-        dbg('  → sent answer to', from);
+        // Trickle ICE: шлём answer сразу, кандидаты придут отдельно через onicecandidate
+        socket.emit('signal', { to: from, data: { type: answer.type, sdp: answer.sdp } });
+        dbg('  → answer sent, signalingState:', pc.signalingState);
 
       } else if(data.type === 'answer'){
+        dbg('  signalingState before setRemote(answer):', pc.signalingState);
         if(pc.signalingState === 'have-local-offer'){
           await pc.setRemoteDescription(new RTCSessionDescription(data));
           await flushIceBuf(entry);
+          dbg('  → answer applied ok');
         } else {
-          dbg('  → answer ignored, signalingState=', pc.signalingState);
+          dbg('  → answer ignored, wrong signalingState:', pc.signalingState);
         }
 
       } else if(data.candidate){
         if(pc.remoteDescription && pc.remoteDescription.type){
-          await pc.addIceCandidate(new RTCIceCandidate(data));
+          try{
+            await pc.addIceCandidate(new RTCIceCandidate(data));
+          } catch(e){
+            dbg('  addIceCandidate error:', e.message);
+          }
         } else {
           entry.iceBuf.push(data);
-          dbg('  → ICE buffered (no remoteDesc yet), buf size=', entry.iceBuf.length);
+          dbg('  → ICE buffered, total:', entry.iceBuf.length);
         }
       }
     } catch(e){
-      dbg('  ❌ signal handler error:', e.message);
+      dbg('  ❌ signal error:', e.message, '| state:', pc.signalingState);
     }
   });
 
@@ -460,7 +469,12 @@ async function createPeer(socketId, name, weInitiate){
 
   dbg(`createPeer: ${name} (${socketId}) weInitiate=${weInitiate}`);
 
-  const pc = new RTCPeerConnection(ICE_SERVERS);
+  const pc = new RTCPeerConnection({
+    ...ICE_SERVERS,
+    iceTransportPolicy: 'all',   // 'relay' только через TURN; 'all' = P2P + TURN
+    bundlePolicy: 'max-bundle',  // аудио+видео через один ICE путь
+    rtcpMuxPolicy: 'require',
+  });
   const av = nextAvatar();
   const tileEl = addVideoTile(socketId, name, av);
   const entry = { pc, stream: null, name, avatarClass: av, tileEl, iceBuf: [] };
@@ -478,47 +492,74 @@ async function createPeer(socketId, name, weInitiate){
 
   pc.onicecandidate = (e) => {
     if(e.candidate){
-      socket.emit('signal', { to: socketId, data: e.candidate });
+      dbg('  → sending ICE candidate to', socketId.slice(0,6), e.candidate.type, e.candidate.protocol);
+      socket.emit('signal', { to: socketId, data: e.candidate.toJSON() });
     } else {
-      dbg('  ICE gathering complete for', socketId);
+      dbg('  ICE gathering complete for', socketId.slice(0,6));
     }
   };
 
-  pc.onicegatheringstatechange = () => dbg('  ICE gathering:', pc.iceGatheringState, 'for', socketId);
+  pc.onicegatheringstatechange = () => {
+    dbg('  ICE gathering:', pc.iceGatheringState, 'for', socketId.slice(0,6));
+  };
   pc.oniceconnectionstatechange = () => {
-    dbg('  ICE connection:', pc.iceConnectionState, 'for', socketId);
-    if(pc.iceConnectionState === 'failed') pc.restartIce();
+    dbg('  ICE connection:', pc.iceConnectionState, 'for', socketId.slice(0,6));
+    if(pc.iceConnectionState === 'failed'){
+      dbg('  → ICE failed, restarting ICE...');
+      pc.restartIce();
+    }
+    if(pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed'){
+      dbg('  ✅ ICE connected!');
+    }
   };
   pc.onconnectionstatechange = () => {
-    dbg('  PC connection:', pc.connectionState, 'for', socketId);
-    if(['disconnected','failed','closed'].includes(pc.connectionState)){
+    dbg('  PC connection:', pc.connectionState, 'for', socketId.slice(0,6));
+    if(['failed','closed'].includes(pc.connectionState)){
       closePeer(socketId);
     }
   };
 
+  // Собираем стрим из треков, запускаем видео один раз когда готово
+  entry.stream = new MediaStream();
+
   pc.ontrack = (e) => {
-    dbg('  ontrack:', e.track.kind, 'from', socketId, 'streams:', e.streams.length);
-    const stream = e.streams[0];
-    if(!stream){ dbg('  ⚠️ no stream in ontrack'); return; }
-    entry.stream = stream;
+    dbg('  ontrack:', e.track.kind, 'from', socketId.slice(0,6));
+    entry.stream.addTrack(e.track);
+
     const video = tileEl.querySelector('video');
-    if(video){
-      video.srcObject = stream;
-      video.style.display = 'block';
-      video.play().catch(err => dbg('  video.play error:', err.message));
+    if(!video) return;
+
+    // Назначаем srcObject один раз
+    if(!video.srcObject){
+      video.srcObject = entry.stream;
     }
-    const av = tileEl.querySelector('.vtile-avatar');
-    if(av) av.style.display = 'none';
-    const overlay = tileEl.querySelector('.cam-off-overlay');
-    if(overlay) overlay.style.display = 'none';
+
+    // Запускаем воспроизведение когда появился видео-трек (или аудио если cam off)
+    if(e.track.kind === 'video' || entry.stream.getVideoTracks().length === 0){
+      video.style.display = 'block';
+      const tryPlay = () => {
+        video.play().then(() => {
+          dbg('  ▶ video playing from', socketId.slice(0,6));
+          const av = tileEl.querySelector('.vtile-avatar');
+          if(av) av.style.display = 'none';
+          const overlay = tileEl.querySelector('.cam-off-overlay');
+          if(overlay) overlay.style.display = 'none';
+        }).catch(err => {
+          dbg('  video.play error:', err.message, '— retrying in 300ms');
+          setTimeout(tryPlay, 300);
+        });
+      };
+      tryPlay();
+    }
   };
 
   // Только инициатор (новый участник) шлёт offer
   if(weInitiate){
     const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
     await pc.setLocalDescription(offer);
-    socket.emit('signal', { to: socketId, data: pc.localDescription });
-    dbg('  → offer sent to', socketId);
+    // Trickle ICE: шлём offer сразу, не ждём сбора кандидатов
+    socket.emit('signal', { to: socketId, data: { type: offer.type, sdp: offer.sdp } });
+    dbg('  → offer sent to', socketId.slice(0,6));
   }
 
   updateParticipantCount();
