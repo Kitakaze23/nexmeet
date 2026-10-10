@@ -295,18 +295,22 @@ h1 em{font-style:normal;color:var(--accent)}
 // ═══════════════════════════════════════════════
 // CONFIG — ICE грузится с сервера (TURN credentials в env vars)
 // ═══════════════════════════════════════════════
-let ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+// TURN credentials захардкожены — не зависим от /ice-config
+const ICE_SERVERS = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:global.relay.metered.ca:80',                 username: '7bdb1099410fd2b4ec361942', credential: 'MpIqK9pzidKpkmyg' },
+    { urls: 'turn:global.relay.metered.ca:80?transport=tcp',   username: '7bdb1099410fd2b4ec361942', credential: 'MpIqK9pzidKpkmyg' },
+    { urls: 'turn:global.relay.metered.ca:443',                username: '7bdb1099410fd2b4ec361942', credential: 'MpIqK9pzidKpkmyg' },
+    { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: '7bdb1099410fd2b4ec361942', credential: 'MpIqK9pzidKpkmyg' },
+  ]
+};
 
 async function loadIceConfig() {
-  try {
-    const res = await fetch('/ice-config');
-    const cfg = await res.json();
-    ICE_SERVERS = cfg;
-    dbg('ICE config loaded:', cfg.iceServers.length, 'servers');
-    cfg.iceServers.forEach(s => dbg(' ', s.urls));
-  } catch(e) {
-    dbg('ICE config failed, STUN only:', e.message);
-  }
+  // Выводим в лог что используем
+  dbg('ICE config ready:', ICE_SERVERS.iceServers.length, 'servers (hardcoded)');
+  ICE_SERVERS.iceServers.forEach(s => dbg(' ', s.urls));
 }
 
 const AVATAR_COLORS = ['av-purple','av-mint','av-coral','av-amber','av-blue'];
