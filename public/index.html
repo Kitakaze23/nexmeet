@@ -295,21 +295,27 @@ h1 em{font-style:normal;color:var(--accent)}
 // ═══════════════════════════════════════════════
 // CONFIG — ICE грузится с сервера (TURN credentials в env vars)
 // ═══════════════════════════════════════════════
-// TURN credentials захардкожены — не зависим от /ice-config
+// TURN: Metered.ca (основной) + Cloudflare (резервный) + Open Relay (запасной)
 const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    // Metered.ca
     { urls: 'turn:global.relay.metered.ca:80',                 username: '7bdb1099410fd2b4ec361942', credential: 'MpIqK9pzidKpkmyg' },
-    { urls: 'turn:global.relay.metered.ca:80?transport=tcp',   username: '7bdb1099410fd2b4ec361942', credential: 'MpIqK9pzidKpkmyg' },
     { urls: 'turn:global.relay.metered.ca:443',                username: '7bdb1099410fd2b4ec361942', credential: 'MpIqK9pzidKpkmyg' },
     { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: '7bdb1099410fd2b4ec361942', credential: 'MpIqK9pzidKpkmyg' },
+    // Cloudflare TURN (бесплатный публичный)
+    { urls: 'turn:turn.cloudflare.com:3478?transport=udp',  username: 'free', credential: 'free' },
+    { urls: 'turn:turn.cloudflare.com:3478?transport=tcp',  username: 'free', credential: 'free' },
+    { urls: 'turns:turn.cloudflare.com:5349?transport=tcp', username: 'free', credential: 'free' },
+    // Twilio NTS (публичный, без auth)
+    { urls: 'stun:global.stun.twilio.com:3478' },
   ]
 };
 
 async function loadIceConfig() {
-  // Выводим в лог что используем
-  dbg('ICE config ready:', ICE_SERVERS.iceServers.length, 'servers (hardcoded)');
+  dbg('ICE config ready:', ICE_SERVERS.iceServers.length, 'servers');
   ICE_SERVERS.iceServers.forEach(s => dbg(' ', s.urls));
 }
 
@@ -356,7 +362,14 @@ function connectSocket(){
   if(socket && socket.connected) return;
 
   // Явно указываем транспорт — сначала polling (работает везде), потом upgrade до WS
-  socket = io({ transports: ['polling', 'websocket'] });
+  socket = io({
+    transports: ['polling', 'websocket'],
+    reconnection: true,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    timeout: 30000,
+  });
 
   socket.on('connect', () => {
     dbg('✅ socket connected id=' + socket.id + ' transport=' + socket.io.engine.transport.name);
@@ -365,7 +378,18 @@ function connectSocket(){
 
   socket.on('connect_error', (e) => dbg('❌ connect_error', e.message));
 
-  socket.on('disconnect', (reason) => dbg('🔌 socket disconnect:', reason));
+  socket.on('disconnect', (reason) => {
+    dbg('🔌 socket disconnect:', reason);
+  });
+
+  socket.on('reconnect', (attempt) => {
+    dbg('🔄 reconnected after', attempt, 'attempts — rejoining room');
+    if(currentRoomId && myName){
+      socket.emit('join-room', { roomId: currentRoomId, name: myName });
+    }
+  });
+
+  socket.on('reconnect_attempt', (n) => dbg('🔄 reconnect attempt', n));
 
   // ── Получаем список тех кто уже в комнате → МЫ им звоним
   socket.on('room-users', async (users) => {
