@@ -3,62 +3,62 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NexMeet — Видеозвонки</title>
+<title>YuviCall — Видеозвонки</title>
 <script src="/socket.io/socket.io.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Inter:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0A0A0F;--bg2:#111118;--bg3:#1A1A2E;
-  --accent:#6C63FF;--mint:#00D4AA;
-  --text:#F0EFF5;--muted:#8B8A9A;--border:#2A2A3E;
-  --danger:#FF3B3B;
+  --bg:#FFF8F2;--bg2:#FFFFFF;--bg3:#FFF0E6;
+  --accent:#E8622A;--mint:#F5A623;
+  --text:#2D1F0E;--muted:#9C7B5E;--border:#F0D9C8;
+  --danger:#E02D2D;
 }
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
 .screen{min-height:100vh;display:flex;flex-direction:column}
 .hidden{display:none!important}
 
 /* ── NAV ── */
-nav{display:flex;align-items:center;justify-content:space-between;padding:18px 32px;border-bottom:1px solid var(--border);background:rgba(10,10,15,0.95);backdrop-filter:blur(12px);position:sticky;top:0;z-index:100}
-.logo{font-family:'Space Grotesk',sans-serif;font-size:22px;font-weight:700;letter-spacing:-0.5px;color:var(--text)}
+nav{display:flex;align-items:center;justify-content:space-between;padding:18px 32px;border-bottom:1px solid var(--border);background:rgba(255,248,242,0.97);backdrop-filter:blur(12px);position:sticky;top:0;z-index:100}
+.logo{font-family:'Nunito',sans-serif;font-size:22px;font-weight:700;letter-spacing:-0.5px;color:var(--text)}
 .logo span{color:var(--accent)}
 .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 18px;border-radius:10px;cursor:pointer;font-size:14px;font-family:'Inter',sans-serif;transition:.2s}
 .btn-ghost:hover{border-color:var(--accent);color:var(--text)}
 
 /* ── HERO ── */
 .hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:60px 24px;position:relative;overflow:hidden}
-.hero-bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 50% at 50% 30%,rgba(108,99,255,0.12) 0%,transparent 70%);pointer-events:none}
-.hero-tag{background:rgba(108,99,255,0.15);border:1px solid rgba(108,99,255,0.3);color:var(--accent);font-size:12px;font-weight:600;padding:6px 14px;border-radius:20px;margin-bottom:28px;letter-spacing:0.5px;text-transform:uppercase}
-h1{font-family:'Space Grotesk',sans-serif;font-size:clamp(36px,7vw,64px);font-weight:700;line-height:1.05;letter-spacing:-2px;margin-bottom:18px}
+.hero-bg{position:absolute;inset:0;background:radial-gradient(ellipse 80% 50% at 50% 30%,rgba(232,98,42,0.08) 0%,transparent 70%);pointer-events:none}
+.hero-tag{background:rgba(232,98,42,0.1);border:1px solid rgba(232,98,42,0.3);color:var(--accent);font-size:12px;font-weight:600;padding:6px 14px;border-radius:20px;margin-bottom:28px;letter-spacing:0.5px;text-transform:uppercase}
+h1{font-family:'Nunito',sans-serif;font-size:clamp(36px,7vw,64px);font-weight:700;line-height:1.05;letter-spacing:-2px;margin-bottom:18px}
 h1 em{font-style:normal;color:var(--accent)}
 .hero-sub{font-size:clamp(15px,2.5vw,17px);color:var(--muted);max-width:460px;line-height:1.6;margin-bottom:44px}
 .orbit-wrap{position:relative;display:inline-flex;align-items:center;justify-content:center;margin-bottom:44px}
-.orbit{position:absolute;width:155px;height:155px;border-radius:50%;border:1.5px solid rgba(108,99,255,0.25);animation:spin 6s linear infinite}
-.orbit::after{content:'';position:absolute;width:8px;height:8px;background:var(--accent);border-radius:50%;top:-4px;left:50%;transform:translateX(-50%)}
-.orbit2{width:195px;height:195px;border-color:rgba(0,212,170,0.12);animation:spin 10s linear infinite reverse}
-.orbit2::after{background:var(--mint);top:auto;bottom:-4px}
+.orbit{position:absolute;width:155px;height:155px;border-radius:50%;border:1.5px solid rgba(232,98,42,0.25);animation:spin 6s linear infinite}
+.orbit::after{content:'🐾';position:absolute;font-size:14px;top:-10px;left:50%;transform:translateX(-50%)}
+.orbit2{width:195px;height:195px;border-color:rgba(245,166,35,0.2);animation:spin 10s linear infinite reverse}
+.orbit2::after{content:'🐾';font-size:11px;top:auto;bottom:-10px;background:none}
 @keyframes spin{to{transform:rotate(360deg)}}
-.btn-create{position:relative;z-index:1;background:var(--accent);color:#fff;border:none;padding:18px 40px;border-radius:14px;font-size:17px;font-weight:600;font-family:'Space Grotesk',sans-serif;cursor:pointer;letter-spacing:-0.3px;transition:.2s;box-shadow:0 0 40px rgba(108,99,255,0.3)}
-.btn-create:hover{background:#7D75FF;transform:scale(1.03)}
+.btn-create{position:relative;z-index:1;background:var(--accent);color:#fff;border:none;padding:18px 40px;border-radius:14px;font-size:17px;font-weight:600;font-family:'Nunito',sans-serif;cursor:pointer;letter-spacing:-0.3px;transition:.2s;box-shadow:0 0 40px rgba(232,98,42,0.25)}
+.btn-create:hover{background:#D4541E;transform:scale(1.03)}
 .btn-create:active{transform:scale(0.98)}
 .join-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:center}
 .join-input{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:13px 18px;border-radius:10px;font-size:15px;font-family:'Inter',sans-serif;width:220px;outline:none;transition:.2s;text-transform:uppercase;letter-spacing:1px}
 .join-input::placeholder{text-transform:none;letter-spacing:0;color:var(--muted)}
-.join-input:focus{border-color:var(--accent)}
+.join-input:focus{border-color:var(--accent);background:#FFF8F2}
 .btn-join{background:transparent;border:1px solid var(--border);color:var(--text);padding:13px 22px;border-radius:10px;font-size:15px;font-family:'Inter',sans-serif;cursor:pointer;transition:.2s;white-space:nowrap}
 .btn-join:hover{border-color:var(--mint);color:var(--mint)}
-.stats{display:flex;border-top:1px solid var(--border);background:var(--bg2)}
+.stats{display:flex;border-top:2px solid var(--border);background:var(--bg2)}
 .stat{flex:1;padding:20px;text-align:center;border-right:1px solid var(--border)}
 .stat:last-child{border-right:none}
-.stat-num{font-family:'Space Grotesk',sans-serif;font-size:22px;font-weight:700;color:var(--accent)}
+.stat-num{font-family:'Nunito',sans-serif;font-size:22px;font-weight:700;color:var(--accent)}
 .stat-label{font-size:12px;color:var(--muted);margin-top:4px}
 
 /* ── JOIN / LOBBY ── */
 #screen-join{align-items:center;justify-content:center;padding:40px 24px}
 .join-card{background:var(--bg2);border:1px solid var(--border);border-radius:20px;padding:36px;width:100%;max-width:460px}
-.join-card h2{font-family:'Space Grotesk',sans-serif;font-size:22px;font-weight:700;margin-bottom:6px}
+.join-card h2{font-family:'Nunito',sans-serif;font-size:22px;font-weight:700;margin-bottom:6px}
 .join-card .room-code-label{color:var(--muted);font-size:13px;margin-bottom:24px;font-family:monospace;letter-spacing:1px}
-.preview-box{width:100%;aspect-ratio:16/9;background:#0D0D14;border-radius:12px;margin-bottom:16px;position:relative;overflow:hidden;border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+.preview-box{width:100%;aspect-ratio:16/9;background:#EDD5BE;border-radius:12px;margin-bottom:16px;position:relative;overflow:hidden;border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
 .preview-box video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 .no-cam{display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--muted);font-size:13px}
 .no-cam-icon{font-size:32px}
@@ -68,8 +68,8 @@ h1 em{font-style:normal;color:var(--accent)}
 .toggle-btn{flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--muted);padding:10px;border-radius:10px;cursor:pointer;font-size:13px;transition:.2s;display:flex;align-items:center;justify-content:center;gap:6px;font-family:'Inter',sans-serif}
 .toggle-btn.on{border-color:var(--accent);color:var(--accent);background:rgba(108,99,255,0.1)}
 .toggle-btn.off{border-color:rgba(255,59,59,0.4);color:var(--danger);background:rgba(255,59,59,0.08)}
-.btn-enter{width:100%;background:var(--accent);color:#fff;border:none;padding:15px;border-radius:12px;font-size:16px;font-weight:600;font-family:'Space Grotesk',sans-serif;cursor:pointer;transition:.2s}
-.btn-enter:hover{background:#7D75FF}
+.btn-enter{width:100%;background:var(--accent);color:#fff;border:none;padding:15px;border-radius:12px;font-size:16px;font-weight:600;font-family:'Nunito',sans-serif;cursor:pointer;transition:.2s}
+.btn-enter:hover{background:#D4541E}
 .btn-enter:disabled{opacity:0.5;cursor:not-allowed}
 .back-link{display:block;text-align:center;margin-top:14px;font-size:13px;color:var(--muted);cursor:pointer;background:none;border:none;font-family:'Inter',sans-serif;width:100%}
 .back-link:hover{color:var(--text)}
@@ -78,8 +78,8 @@ h1 em{font-style:normal;color:var(--accent)}
 #screen-room{overflow:hidden;max-height:100vh}
 .room-nav{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0}
 .room-info{display:flex;align-items:center;gap:12px}
-.room-badge{background:rgba(0,212,170,0.15);border:1px solid rgba(0,212,170,0.3);color:var(--mint);font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;letter-spacing:0.5px}
-.room-id-label{font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:600}
+.room-badge{background:rgba(232,98,42,0.15);border:1px solid rgba(232,98,42,0.3);color:var(--accent);font-size:10px;font-weight:700;padding:3px 8px;border-radius:5px;letter-spacing:0.5px}
+.room-id-label{font-family:'Nunito',sans-serif;font-size:15px;font-weight:600}
 .room-sub{font-size:12px;color:var(--muted)}
 .copy-btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-family:'Inter',sans-serif;transition:.2s}
 .copy-btn:hover{border-color:var(--mint);color:var(--mint)}
@@ -94,24 +94,24 @@ h1 em{font-style:normal;color:var(--accent)}
 .vg-3 .vtile:first-child{grid-column:1/-1}
 .vg-4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
 .vg-5,.vg-6{grid-template-columns:repeat(3,1fr)}
-.vtile{background:#0D0D14;border-radius:12px;position:relative;overflow:hidden;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;min-height:100px;transition:border-color .3s}
+.vtile{background:#F5E6D8;border-radius:12px;position:relative;overflow:hidden;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;min-height:100px;transition:border-color .3s}
 .vtile.local{border-color:rgba(108,99,255,0.5)}
 .vtile.speaking{border-color:var(--mint)!important}
 .vtile video{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
 .vtile video.local-vid{transform:scaleX(-1)}
-.vtile-avatar{width:54px;height:54px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:700;z-index:1;position:relative}
+.vtile-avatar{width:54px;height:54px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Nunito',sans-serif;font-size:20px;font-weight:700;z-index:1;position:relative}
 .av-purple{background:rgba(108,99,255,0.25);color:var(--accent)}
 .av-mint{background:rgba(0,212,170,0.2);color:var(--mint)}
 .av-coral{background:rgba(255,90,90,0.2);color:#FF7070}
 .av-amber{background:rgba(255,180,50,0.2);color:#FFB432}
 .av-blue{background:rgba(80,160,255,0.2);color:#50A0FF}
-.tile-label{position:absolute;bottom:8px;left:10px;background:rgba(10,10,15,0.8);padding:4px 10px;border-radius:6px;font-size:12px;font-weight:500;display:flex;align-items:center;gap:5px;z-index:2;backdrop-filter:blur(4px)}
+.tile-label{position:absolute;bottom:10px;left:10px;background:rgba(20,10,5,0.75);color:#fff;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:500;display:flex;align-items:center;gap:5px;z-index:2;backdrop-filter:blur(4px)}
 .tile-muted{color:var(--danger);font-size:10px}
-.cam-off-overlay{position:absolute;inset:0;background:rgba(10,10,15,0.85);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;font-size:11px;color:var(--muted);z-index:1}
+.cam-off-overlay{position:absolute;inset:0;background:rgba(255,240,230,0.95);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;font-size:11px;color:var(--muted);z-index:1}
 .cam-off-overlay .vtile-avatar{margin-bottom:4px}
 
 /* CHAT PANEL */
-.chat-panel{width:280px;background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;transition:.3s}
+.chat-panel{width:280px;background:var(--bg2);border-left:2px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;transition:.3s}
 .chat-panel.closed{width:0;overflow:hidden;border:none}
 .chat-header{padding:14px 16px;border-bottom:1px solid var(--border);font-size:14px;font-weight:500;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
 .chat-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;padding:0;line-height:1}
@@ -127,11 +127,11 @@ h1 em{font-style:normal;color:var(--accent)}
 .chat-input{flex:1;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;font-family:'Inter',sans-serif;outline:none}
 .chat-input:focus{border-color:var(--accent)}
 .chat-send{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:13px;transition:.2s}
-.chat-send:hover{background:#7D75FF}
+.chat-send:hover{background:#D4541E}
 
 /* CONTROLS */
-.controls{padding:12px 24px 16px;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;flex-shrink:0;background:var(--bg)}
-.ctrl-btn{width:50px;height:50px;border-radius:50%;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;transition:.2s;position:relative;flex-shrink:0}
+.controls{padding:12px 24px 16px;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;flex-shrink:0;background:#FFF0E6}
+.ctrl-btn{width:50px;height:50px;border-radius:50%;border:1px solid var(--border);background:#FFFFFF;color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;transition:.2s;position:relative;flex-shrink:0}
 .ctrl-btn:hover{border-color:var(--muted)}
 .ctrl-btn.active{background:rgba(108,99,255,0.15);border-color:var(--accent);color:var(--accent)}
 .ctrl-btn.muted{background:rgba(255,59,59,0.1);border-color:rgba(255,59,59,0.4);color:var(--danger)}
@@ -183,15 +183,15 @@ h1 em{font-style:normal;color:var(--accent)}
 <!-- ══════════ HOME ══════════ -->
 <div id="screen-home" class="screen">
   <nav>
-    <div class="logo">Nex<span>Meet</span></div>
+    <div class="logo">🐾 Yuvi<span>Call</span></div>
     <button class="btn-ghost" onclick="UI.showJoinPrompt()">Войти в комнату</button>
   </nav>
 
   <div class="hero">
     <div class="hero-bg"></div>
-    <div class="hero-tag">WebRTC P2P · Без регистрации</div>
-    <h1>Созвон без<br><em>лишних слов</em></h1>
-    <p class="hero-sub">Нажмите — получите ссылку. Поделитесь. Видеосвязь начнётся мгновенно.</p>
+    <div class="hero-tag">🐾 WebRTC P2P · Без регистрации</div>
+    <h1>Видеозвонки<br><em>для своих 🐾</em></h1>
+    <p class="hero-sub">Нажмите — получите ссылку. Поделитесь с другом. Встреча начнётся мгновенно 🦴</p>
 
     <div class="orbit-wrap">
       <div class="orbit"></div>
@@ -207,7 +207,7 @@ h1 em{font-style:normal;color:var(--accent)}
   </div>
 
   <div class="stats">
-    <div class="stat"><div class="stat-num">P2P</div><div class="stat-label">прямое соединение</div></div>
+    <div class="stat"><div class="stat-num">🐾</div><div class="stat-label">для своих</div></div>
     <div class="stat"><div class="stat-num">E2E</div><div class="stat-label">шифрование DTLS</div></div>
     <div class="stat"><div class="stat-num">∞</div><div class="stat-label">участников</div></div>
   </div>
@@ -216,7 +216,7 @@ h1 em{font-style:normal;color:var(--accent)}
 <!-- ══════════ JOIN/LOBBY ══════════ -->
 <div id="screen-join" class="screen hidden">
   <nav>
-    <div class="logo">Nex<span>Meet</span></div>
+    <div class="logo">🐾 Yuvi<span>Call</span></div>
     <button class="btn-ghost" onclick="UI.goHome()">← Главная</button>
   </nav>
 
@@ -335,7 +335,7 @@ const peers = new Map();
 // DEBUG LOG (видно прямо в интерфейсе)
 // ═══════════════════════════════════════════════
 function dbg(...args){
-  console.log('[NexMeet]', ...args);
+  console.log('[YuviCall]', ...args);
   const panel = document.getElementById('dbg-panel');
   if(!panel) return;
   const line = document.createElement('div');
@@ -921,7 +921,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 <!-- DEBUG PANEL -->
 <style>
-#dbg-wrap{position:fixed;bottom:0;left:0;right:0;background:#0a0a0a;border-top:1px solid #333;z-index:9999;display:none;max-height:200px}
+#dbg-wrap{position:fixed;bottom:0;left:0;right:0;background:#2D1F0E;border-top:1px solid #4A3020;z-index:9999;display:none;max-height:200px}
 #dbg-panel{overflow-y:auto;max-height:160px;padding:8px 12px;font-family:monospace}
 #dbg-toolbar{display:flex;align-items:center;justify-content:space-between;padding:4px 12px;border-bottom:1px solid #222}
 #dbg-toolbar span{font-size:11px;color:#666;font-family:monospace}
@@ -929,7 +929,7 @@ window.addEventListener('DOMContentLoaded', () => {
 </style>
 <div id="dbg-wrap">
   <div id="dbg-toolbar">
-    <span>🔍 NexMeet Debug Log</span>
+    <span>🔍 YuviCall Debug Log</span>
     <div style="display:flex;gap:6px">
       <button onclick="document.getElementById('dbg-panel').innerHTML=''">Clear</button>
       <button onclick="document.getElementById('dbg-wrap').style.display='none'">✕</button>
