@@ -8,31 +8,15 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' },
   transports: ['websocket', 'polling'],
-  allowEIO3: true
+  allowEIO3: true,
+  // Увеличиваем таймауты — важно для Timeweb и мобильных клиентов
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  upgradeTimeout: 30000,
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── ICE конфиг отдаётся клиенту с сервера (credentials не светятся в HTML)
-app.get('/ice-config', (req, res) => {
-  const TURN_USER = '7bdb1099410fd2b4ec361942';
-  const TURN_PASS = 'MpIqK9pzidKpkmyg';
-  const TURN_HOST = 'global.relay.metered.ca';
-
-  const iceServers = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: `turn:${TURN_HOST}:80`,                    username: TURN_USER, credential: TURN_PASS },
-    { urls: `turn:${TURN_HOST}:80?transport=tcp`,      username: TURN_USER, credential: TURN_PASS },
-    { urls: `turn:${TURN_HOST}:443`,                   username: TURN_USER, credential: TURN_PASS },
-    { urls: `turns:${TURN_HOST}:443?transport=tcp`,    username: TURN_USER, credential: TURN_PASS },
-  ];
-
-  console.log('ICE config: STUN + TURN via', TURN_HOST);
-  res.json({ iceServers });
-});
-
-// ── Health check
 app.get('/health', (req, res) => {
   const roomInfo = {};
   rooms.forEach((members, roomId) => {
@@ -41,7 +25,6 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, rooms: roomInfo, connections: io.engine.clientsCount });
 });
 
-// roomId -> Map<socketId, { name, socketId }>
 const rooms = new Map();
 
 io.on('connection', (socket) => {
@@ -63,7 +46,7 @@ io.on('connection', (socket) => {
     socket.emit('room-users', existing);
     socket.to(roomId).emit('user-joined', { socketId: socket.id, name });
 
-    console.log(`[${roomId}] "${name}" joined. Total: ${room.size}:`, [...room.values()].map(u=>u.name));
+    console.log(`[${roomId}] "${name}" joined. Total: ${room.size}:`, [...room.values()].map(u => u.name));
   });
 
   socket.on('signal', ({ to, data }) => {
@@ -96,4 +79,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`NexMeet → http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`YuviCall → http://localhost:${PORT}`));
