@@ -100,6 +100,7 @@ h1 em{font-style:normal;color:var(--accent)}
 .vtile video{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
 .vtile video.local-vid{transform:scaleX(-1)}
 .vtile-avatar{width:54px;height:54px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Nunito',sans-serif;font-size:20px;font-weight:700;z-index:1;position:relative}
+.vtile.has-video .vtile-avatar{display:none!important}
 .av-purple{background:rgba(108,99,255,0.25);color:var(--accent)}
 .av-mint{background:rgba(0,212,170,0.2);color:var(--mint)}
 .av-coral{background:rgba(255,90,90,0.2);color:#FF7070}
@@ -363,12 +364,14 @@ function connectSocket(){
 
   // Явно указываем транспорт — сначала polling (работает везде), потом upgrade до WS
   socket = io({
-    transports: ['polling', 'websocket'],
+    // Только polling — Timeweb proxy режет WebSocket upgrade через ~70 сек
+    // Polling (HTTP long-poll) не имеет этой проблемы
+    transports: ['polling'],
     reconnection: true,
-    reconnectionAttempts: 10,
+    reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
-    reconnectionDelayMax: 5000,
-    timeout: 30000,
+    reconnectionDelayMax: 3000,
+    timeout: 20000,
   });
 
   socket.on('connect', () => {
@@ -383,8 +386,9 @@ function connectSocket(){
   });
 
   socket.on('reconnect', (attempt) => {
-    dbg('🔄 reconnected after', attempt, 'attempts — rejoining room');
+    dbg('🔄 reconnected after', attempt, 'attempts');
     if(currentRoomId && myName){
+      dbg('🔄 rejoining room', currentRoomId);
       socket.emit('join-room', { roomId: currentRoomId, name: myName });
     }
   });
@@ -402,6 +406,14 @@ function connectSocket(){
   // ── Кто-то новый вошёл → ОН нам позвонит (мы не инициируем)
   socket.on('user-joined', async ({ socketId, name }) => {
     dbg('user-joined:', name, socketId);
+    // Отменяем таймер закрытия если это реконнект
+    peers.forEach((e, sid) => {
+      if(e._leaveTimer && e.name === name && sid !== socketId){
+        dbg('  → cancelled leave timer for', name, '(reconnected as', socketId.slice(0,6), ')');
+        clearTimeout(e._leaveTimer);
+        closePeer(sid); // закрываем старый peer
+      }
+    });
     showToast(`${name} вошёл`);
     await createPeer(socketId, name, false);
   });
@@ -457,8 +469,25 @@ function connectSocket(){
 
   socket.on('user-left', ({ socketId, name }) => {
     dbg('user-left:', name, socketId);
-    showToast(`${name} покинул комнату`);
-    closePeer(socketId);
+    const entry = peers.get(socketId);
+    // Если ICE был connected — это может быть временный реконнект сокета
+    // Ждём 6 сек: если не переподключится — закрываем
+    const wasConnected = entry && (
+      entry.pc.iceConnectionState === 'connected' ||
+      entry.pc.iceConnectionState === 'completed' ||
+      entry.pc.iceConnectionState === 'disconnected'
+    );
+    if(wasConnected){
+      dbg('  → peer had active ICE, waiting 6s before closing...');
+      entry._leaveTimer = setTimeout(() => {
+        dbg('  → closing peer after timeout');
+        showToast(`${name} покинул комнату`);
+        closePeer(socketId);
+      }, 6000);
+    } else {
+      showToast(`${name} покинул комнату`);
+      closePeer(socketId);
+    }
   });
 
   socket.on('media-state', ({ socketId, micOn, camOn }) => {
@@ -505,7 +534,7 @@ async function createPeer(socketId, name, weInitiate){
   });
   const av = nextAvatar();
   const tileEl = addVideoTile(socketId, name, av);
-  const entry = { pc, stream: null, name, avatarClass: av, tileEl, iceBuf: [] };
+  const entry = { pc, stream: null, name, avatarClass: av, tileEl, iceBuf: [], initiated: weInitiate };
   peers.set(socketId, entry);
 
   // Добавляем свои треки
@@ -534,7 +563,16 @@ async function createPeer(socketId, name, weInitiate){
     dbg('  ICE connection:', pc.iceConnectionState, 'for', socketId.slice(0,6));
     if(pc.iceConnectionState === 'failed'){
       dbg('  → ICE failed, restarting ICE...');
-      pc.restartIce();
+      try{
+        pc.restartIce();
+        // Если мы инициатор — переотправляем offer с ICE restart
+        if(entry && entry.initiated){
+          const offer = await pc.createOffer({ iceRestart: true });
+          await pc.setLocalDescription(offer);
+          socket.emit('signal', { to: socketId, data: { type: offer.type, sdp: offer.sdp } });
+          dbg('  → ICE restart offer sent');
+        }
+      } catch(e){ dbg('  restartIce error:', e.message); }
     }
     if(pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed'){
       dbg('  ✅ ICE connected!');
@@ -568,8 +606,7 @@ async function createPeer(socketId, name, weInitiate){
       const tryPlay = () => {
         video.play().then(() => {
           dbg('  ▶ video playing from', socketId.slice(0,6));
-          const av = tileEl.querySelector('.vtile-avatar');
-          if(av) av.style.display = 'none';
+          tileEl.classList.add('has-video'); // CSS скроет аватар
           const overlay = tileEl.querySelector('.cam-off-overlay');
           if(overlay) overlay.style.display = 'none';
         }).catch(err => {
@@ -668,8 +705,7 @@ function buildLocalTile(){
   if(localStream && localCamOn){
     video.srcObject = localStream;
     video.style.display = 'block';
-    const av = tile.querySelector('.vtile-avatar');
-    if(av) av.style.display = 'none';
+    tile.classList.add('has-video');
   }
   return tile;
 }
@@ -830,9 +866,8 @@ const Room = {
     const localTile = document.querySelector('.vtile.local');
     if(localTile){
       const v = localTile.querySelector('video');
-      const av = localTile.querySelector('.vtile-avatar');
       if(v) v.style.display = localCamOn ? 'block' : 'none';
-      if(av) av.style.display = localCamOn ? 'none' : 'flex';
+      localTile.classList.toggle('has-video', localCamOn);
     }
     if(socket) socket.emit('media-state', { micOn: localMicOn, camOn: localCamOn });
   },
@@ -886,8 +921,7 @@ const Room = {
     const text = input.value.trim();
     if(!text || !socket) return;
     socket.emit('chat-msg', { text });
-    appendChatMsg(myName, text, true);
-    input.value = '';
+    input.value = ''; // сообщение придёт обратно через socket 'chat-msg'
   },
   copyLink(){
     const url = window.location.origin + '/?room=' + currentRoomId;
