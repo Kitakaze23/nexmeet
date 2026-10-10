@@ -559,7 +559,7 @@ async function createPeer(socketId, name, weInitiate){
   pc.onicegatheringstatechange = () => {
     dbg('  ICE gathering:', pc.iceGatheringState, 'for', socketId.slice(0,6));
   };
-  pc.oniceconnectionstatechange = () => {
+  pc.oniceconnectionstatechange = async () => {
     dbg('  ICE connection:', pc.iceConnectionState, 'for', socketId.slice(0,6));
     if(pc.iceConnectionState === 'failed'){
       dbg('  → ICE failed, restarting ICE...');
@@ -1001,4 +1001,3 @@ window.addEventListener('DOMContentLoaded', () => {
 </div>
 </body>
 </html>
-
