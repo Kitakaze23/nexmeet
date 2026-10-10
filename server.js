@@ -10,9 +10,9 @@ const io = new Server(server, {
   transports: ['websocket', 'polling'],
   allowEIO3: true,
   // Увеличиваем таймауты — важно для Timeweb и мобильных клиентов
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  upgradeTimeout: 30000,
+  pingTimeout: 30000,   // ждём pong 30 сек
+  pingInterval: 10000,  // ping каждые 10 сек — держим polling живым
+  upgradeTimeout: 10000,
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
